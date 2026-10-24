@@ -1,9 +1,11 @@
 # Example repos to install
 # Format: [URL][?install path][?origin commit id]
 
-# https://github.com/ntoutges/micro3d.git
+# git@github.com:ntoutges/micro3d.git
 # https://github.com/ntoutges/a4.git lib/a4
 
 # 2nd item in a line is treated as the exact commit/branch to checkout
 # https://github.com/ntoutges/c-bergen.git lib/c-bergen 3f0c5daefad102767de3e3db0f3cc653af7719ab
+
+git@github.com:ntoutges/subrepo_install.git
 

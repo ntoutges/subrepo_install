@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 MOD_FILE=".srimodules"
+LOG_FILE=".logs.tmp" # Temporary logs file
 
 # Search for .git file/dir indicating root of some repo
 while ! ([ -f .git ] || [ -d .git ]); do
@@ -14,55 +15,210 @@ while ! ([ -f .git ] || [ -d .git ]); do
     cd .. # Move to parent dir
 done
 
-echo "Installing modules in '$PWD'..."
-
 # Search for file containing all submodule information
-
 if ! [ -f "$MOD_FILE" ]; then
     echo "No '$MOD_FILE' file found"
     exit 1
 fi
 
-# Read through submodule file
-linenum=0
-while read line; do
+print_error() {
+    echo -ne "\e[0;31m" # Indicate error; red text
+    cat "$LOG_FILE" # Dump logs to terminal for diagnosis
+    echo -ne "\e[0m" # Revert to standard colors
+}
 
-    linenum=$((linenum + 1))
+# Stack of MOD_FILE files that still need to be installed
+mod_files=("$PWD/$MOD_FILE")
 
-    # Ignore comments
-    line=$(sed "s/#.*//" <<< "$line")
+install() {
 
-    # Skip empty lines
-    if ! (grep -qE "\S" <<< "$line"); then
-        continue
+    local filename="$1"
+
+    echo -n "Installing modules in '"
+    sed -E "s/^(.*\/)[^/]*$/\1/" <<< "$filename"
+
+    # Read through submodule file
+    local linenum=0
+    local action=0
+    while read line; do
+
+        linenum=$((linenum + 1))
+
+        # Ignore comments
+        local line=$(sed "s/#.*//" <<< "$line")
+
+        # Skip empty lines
+        if ! (grep -qE "\S" <<< "$line"); then
+            continue
+        fi
+
+        # Split by spaces to get 3 parts
+        # Format: [URL][?location][?commit]
+        local parts=($line)
+
+        if (( ${#parts[@]} > 4 )); then
+            echo " Unrecognized arguments on line $linenum"
+            continue # Avoid installing line that we don't understand
+        fi
+
+        action=1 # Mark that something actually happened
+
+        local path
+        local commit
+
+        # Extract path data
+        if [ "${#parts[@]}" -eq 1 ]; then # Using default location
+            path=$(sed -E "s/^.*\/([^\/]*)\.[^.]*$/\1/" <<< "${parts[0]}")
+        else # Using provided location
+            path="${parts[1]}"
+        fi
+
+        # Extract commit/branch data
+        if [ "${#parts[@]}" -eq 3 ]; then # Using default branch
+            commit=""
+        else # Use provided commit/branch
+            commit="${parts[2]}"
+        fi
+
+        # Entry not yet installed
+        if [ ! -d "$path" ]; then
+
+            echo -n " Cloning ${parts[0]} ... "
+
+            # Install entry
+            git clone "${parts[0]}" "$path" 2> "$LOG_FILE"
+            if [ $? -ne 0 ]; then
+                echo "Failed to clone"
+                print_error
+                continue
+            fi
+
+            # Move to specified commit if required
+            if [ ! -z "$commit" ]; then (
+                cd "$path"
+
+                # Attempt to checkout branch
+                # If not a branch, treat as commit id
+                git checkout "$commit" || git switch --detach "$commit"
+
+                # Failed to clone properly
+                if [ $? -ne 0 ]; then
+                    echo "Failed to checkout"
+                    print_error
+                    continue
+                fi
+
+            ) fi
+
+            # Install git submodules (backwards-compatibility)
+            git submodule update --init --recursive
+            if [ $? -ne 0 ]; then
+                echo "Failed to install git submodules"
+                print_error
+                continue
+            fi
+
+            echo "Success!"
+
+        else (
+            echo -n " Updating ./$path ... "
+
+            # Move into git repo
+            cd "$path"
+
+            # Revert any local changes
+            git reset --hard HEAD &> "$LOG_FILE"
+            if [ $? -ne 0 ]; then
+                echo "Failed to reset"
+                print_error
+                continue
+            fi
+
+            # Fetch any remote changes
+            git fetch &> "$LOG_FILE"
+            if [ $? -ne 0 ]; then
+                echo "Failed to reset"
+                print_error
+                continue
+            fi
+
+            if [ -z "$commit" ]; then # No commit specified
+
+                # Move to default branch
+                git checkout main &> "$LOG_FILE"
+                if [ $? -ne 0 ]; then
+                    echo "Failed to checkout main"
+                    print_error
+                    continue
+                fi
+            else # Commit/branch specified
+
+                # Attempt to checkout branch
+                # If not a branch, treat as commit id
+                git checkout "$commit" &> "$LOG_FILE" || git switch --detach "$commit" &> "$LOG_FILE"
+                if [ $? -ne 0 ]; then
+                    echo "Failed to checkout $commit"
+                    print_error
+                    continue
+                fi
+            fi
+
+            # Fetch+merge any changes
+            git pull &> "$LOG_FILE"
+            if [ $? -ne 0 ]; then
+                echo "Failed to pull"
+                print_error
+                continue
+            fi
+
+            # Install git submodules (backwards-compatibility)
+            git submodule update --init --recursive
+            if [ $? -ne 0 ]; then
+                echo "Failed to install git submodules"
+                print_error
+                continue
+            fi
+
+            echo "Success!"
+
+        ) fi
+
+        # Search for sub-install scripts
+        while read nested_path; do
+            
+            # User feedback
+            echo -ne "\e[0;32m" # Set color to green
+            echo " + $nested_path"
+            echo -ne "\e[0m" # Revert to standard colors
+
+            # Push to stack
+            mod_files+=("$nested_path")
+
+        done < <(find "$path" -type f -name ".srimodules")
+
+        # Recursively run sub-install scripts
+
+    done <"$filename"
+
+    if [ "$action" -eq 0 ]; then
+        echo " Empty..."
     fi
+}
 
-    # Split by spaces to get 3 parts
-    # Format: [URL][?location][?commit]
-    parts=($line)
+# echo ${mod_files[0]}
 
-    if (( ${#parts[@]} > 4 )); then
-        echo "Unrecognized arguments on line $linenum"
-        continue # Avoid installing line that we don't understand
-    fi
+while [ "${#mod_files[@]}" -ne 0 ]; do
 
-    # Install entry
-    if [ "${#parts[@]}" -eq 1 ]; then # Install in default location
-        git clone "${parts[0]}"
-    elif [ "${#parts[@]}" -eq 2 ]; then # Install in specified location
-        git clone "${parts[0]}" "${parts[1]}"
-    else # Install in a specified location from some commit id
-        git clone "${parts[0]}" "${parts[1]}"
-        (
-            cd "${parts[1]}"
+    # Pop file from stack
+    mod_file="${mod_files[-1]}"
+    unset "mod_files[-1]"
 
-            # Attempt to checkout branch
-            # If not a branch, treat as commit id
-            git checkout "${parts[2]}" || git switch --detach "${parts[2]}"
-        )
-    fi
+    # Install file
+    install "$mod_file"
 
-done <"$MOD_FILE"
+done
 
-
-# $FILE=(ls | grep -E "^.srimodules$")
+# Remove temporary file
+if [ -f "$LOG_FILE" ]; then
+    rm "$LOG_FILE"
+fi
