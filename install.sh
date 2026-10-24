@@ -27,15 +27,15 @@ print_error() {
     echo -ne "\e[0m" # Revert to standard colors
 }
 
-# Stack of MOD_FILE files that still need to be installed
-mod_files=("$PWD/$MOD_FILE")
+mod_files=("$PWD/$MOD_FILE") # Stack of MOD_FILE files that still need to be installed
 
 install() {
 
     local filename="$1"
+    local filepath=$(sed -E "s/^(.*\/)[^/]*$/\1/" <<< "$filename")
+    local update_gitignore="$2"
 
-    echo -n "Installing modules in '"
-    sed -E "s/^(.*\/)[^/]*$/\1/" <<< "$filename"
+    echo "Installing modules in $filepath"
 
     # Read through submodule file
     local linenum=0
@@ -63,14 +63,14 @@ install() {
 
         action=1 # Mark that something actually happened
 
-        local path
+        local path="$filepath" # Set filepath as root
         local commit
 
         # Extract path data
         if [ "${#parts[@]}" -eq 1 ]; then # Using default location
-            path=$(sed -E "s/^.*\/([^\/]*)\.[^.]*$/\1/" <<< "${parts[0]}")
+            path+=$(sed -E "s/^.*\/([^\/]*)\.[^.]*$/\1/" <<< "${parts[0]}")
         else # Using provided location
-            path="${parts[1]}"
+            path+="${parts[1]}"
         fi
 
         # Extract commit/branch data
@@ -120,8 +120,14 @@ install() {
 
             echo "Success!"
 
+            # Ensure git doesn't track these new files
+            relpath="/$(realpath --relative-to "$PWD" "$path")"
+            if [ ! -f ".gitignore" ] || ! grep -qxF "$relpath" ".gitignore"; then
+                echo "$relpath" >> .gitignore
+            fi
+
         else (
-            echo -n " Updating ./$path ... "
+            echo -n " Updating $path ... "
 
             # Move into git repo
             cd "$path"
@@ -191,12 +197,10 @@ install() {
             echo " + $nested_path"
             echo -ne "\e[0m" # Revert to standard colors
 
-            # Push to stack
+            # Push to stack to run install script on these later modules
             mod_files+=("$nested_path")
 
         done < <(find "$path" -type f -name ".srimodules")
-
-        # Recursively run sub-install scripts
 
     done <"$filename"
 
@@ -205,7 +209,7 @@ install() {
     fi
 }
 
-# echo ${mod_files[0]}
+update_gitignore=1
 
 while [ "${#mod_files[@]}" -ne 0 ]; do
 
@@ -214,7 +218,8 @@ while [ "${#mod_files[@]}" -ne 0 ]; do
     unset "mod_files[-1]"
 
     # Install file
-    install "$mod_file"
+    install "$mod_file" "$update_gitignore"
+    update_gitignore=0
 
 done
 
