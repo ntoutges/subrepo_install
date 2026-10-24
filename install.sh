@@ -86,7 +86,7 @@ install() {
             echo -n " Cloning ${parts[0]} ... "
 
             # Install entry
-            git clone "${parts[0]}" "$path" 2> "$LOG_FILE"
+            git clone "${parts[0]}" "$path" &> "$LOG_FILE"
             if [ $? -ne 0 ]; then
                 echo "Failed to clone"
                 print_error
@@ -99,7 +99,7 @@ install() {
 
                 # Attempt to checkout branch
                 # If not a branch, treat as commit id
-                git checkout "$commit" || git switch --detach "$commit"
+                git checkout "$commit" &> "$LOG_FILE" || git switch --detach "$commit" &> "$LOG_FILE"
 
                 # Failed to clone properly
                 if [ $? -ne 0 ]; then
@@ -110,13 +110,17 @@ install() {
 
             ) fi
 
-            # Install git submodules (backwards-compatibility)
-            git submodule update --init --recursive
-            if [ $? -ne 0 ]; then
-                echo "Failed to install git submodules"
-                print_error
-                continue
-            fi
+            (
+                cd "$path"
+
+                # Install git submodules (backwards-compatibility)
+                git submodule update --init --recursive &> "$LOG_FILE"
+                if [ $? -ne 0 ]; then
+                    echo "Failed to install git submodules"
+                    print_error
+                    continue
+                fi
+            )
 
             echo "Success!"
 
@@ -178,7 +182,7 @@ install() {
             fi
 
             # Install git submodules (backwards-compatibility)
-            git submodule update --init --recursive
+            git submodule update --init --recursive &> "$LOG_FILE"
             if [ $? -ne 0 ]; then
                 echo "Failed to install git submodules"
                 print_error
