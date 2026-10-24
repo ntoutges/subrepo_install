@@ -29,6 +29,9 @@ print_error() {
 
 mod_files=("$PWD/$MOD_FILE") # Stack of MOD_FILE files that still need to be installed
 
+# Get absolute path for log file
+LOG_FILE=$(realpath "$LOG_FILE")
+
 install() {
 
     local filename="$1"
