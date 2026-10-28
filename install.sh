@@ -43,12 +43,12 @@ install() {
     # Read through submodule file
     local linenum=0
     local action=0
-    while read line; do
+    while read line || [ -n "$line" ]; do
 
         linenum=$((linenum + 1))
 
         # Ignore comments
-        local line=$(sed "s/#.*//" <<< "$line")
+        local line=$((sed "s/#.*//" <<< "$line") | tr -d "\r\n")
 
         # Skip empty lines
         if ! (grep -qE "\S" <<< "$line"); then
@@ -130,6 +130,12 @@ install() {
             # Ensure git doesn't track these new files
             relpath="/$(realpath --relative-to "$PWD" "$path")"
             if [ ! -f ".gitignore" ] || ! grep -qxF "$relpath" ".gitignore"; then
+
+                # Add newline, if required
+                if [ -f ".gitignore" ] && ! ( tail .gitignore -c1 | grep -qzP "\n" ); then
+                    echo -ne "\n" >> .gitignore
+                fi
+
                 echo "$relpath" >> .gitignore
             fi
 
@@ -197,7 +203,7 @@ install() {
         ) fi
 
         # Search for sub-install scripts
-        while read nested_path; do
+        while read nested_path || [ -n "$nested_path" ]; do
             
             # User feedback
             echo -ne "\e[0;32m" # Set color to green
